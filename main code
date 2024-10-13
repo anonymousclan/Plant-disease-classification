@@ -1,0 +1,160 @@
+# Importing Required Libraries
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization, LeakyReLU
+from keras.optimizers import SGD
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import matplotlib.pyplot as plt
+from keras.preprocessing import image
+import numpy as np
+
+# Initializing the CNN
+classifier = Sequential()
+
+# Convolution Step 1
+classifier.add(Conv2D(96, 11, strides=(4, 4), padding='valid', input_shape=(224, 224, 3)))
+classifier.add(LeakyReLU(alpha=0.1))
+classifier.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='valid'))
+classifier.add(BatchNormalization())
+
+# Convolution Step 2
+classifier.add(Conv2D(256, 11, strides=(1, 1), padding='valid'))
+classifier.add(LeakyReLU(alpha=0.1))
+classifier.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='valid'))
+classifier.add(BatchNormalization())
+
+# Convolution Steps 3-5
+for _ in range(3):
+    classifier.add(Conv2D(384, 3, strides=(1, 1), padding='valid'))
+    classifier.add(LeakyReLU(alpha=0.1))
+    classifier.add(BatchNormalization())
+
+# Additional Max Pooling Step
+classifier.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='valid'))
+classifier.add(BatchNormalization())
+
+# Flattening
+classifier.add(Flatten())
+
+# Fully Connected Layers
+classifier.add(Dense(units=4096))
+classifier.add(LeakyReLU(alpha=0.1))
+classifier.add(Dropout(0.5))
+classifier.add(BatchNormalization())
+
+classifier.add(Dense(units=1000))
+classifier.add(LeakyReLU(alpha=0.1))
+classifier.add(Dropout(0.4))
+classifier.add(BatchNormalization())
+
+classifier.add(Dense(units=38, activation='softmax'))
+
+# Summary of the Model
+classifier.summary()
+
+# Freezing Initial Layers
+for i, layer in enumerate(classifier.layers[:15]):
+    layer.trainable = False
+
+# Recompile with SGD Optimizer
+optimizer = SGD(learning_rate=0.001, momentum=0.9)
+classifier.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Data Augmentation
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    shear_range=0.3,
+    zoom_range=0.3,
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    horizontal_flip=True,
+    rotation_range=30,
+    fill_mode='nearest'
+)
+
+valid_datagen = ImageDataGenerator(rescale=1./255)
+
+batch_size = 128
+base_dir = "/kaggle/input/new-plant-diseases-dataset/New Plant Diseases Dataset(Augmented)/New Plant Diseases Dataset(Augmented)"
+
+training_set = train_datagen.flow_from_directory(
+    base_dir+'/train',
+    target_size=(224, 224),
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+valid_set = valid_datagen.flow_from_directory(
+    base_dir+'/valid',
+    target_size=(224, 224),
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+# Model Checkpoint and Early Stopping
+checkpoint = ModelCheckpoint(
+    filepath="/kaggle/working/best_weights_9.weights.h5",
+    monitor='val_accuracy',
+    verbose=1,
+    save_best_only=True,
+    save_weights_only=True,
+    mode='max'
+)
+
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=5,
+    verbose=1,
+    restore_best_weights=True
+)
+
+callbacks_list = [checkpoint, early_stopping]
+
+# Model Training
+history = classifier.fit(
+    training_set,
+    steps_per_epoch=min(training_set.samples // batch_size, 50),
+    validation_data=valid_set,
+    epochs=25,
+    validation_steps=min(valid_set.samples // batch_size, 50),
+    callbacks=callbacks_list
+)
+
+# Plotting Training and Validation Accuracy
+plt.figure(figsize=(10, 6))
+plt.plot(history.history['accuracy'], label='Training Accuracy', color='green')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy', color='blue')
+plt.title('Training and Validation Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
+
+# Plotting Training and Validation Loss
+plt.figure(figsize=(10, 6))
+plt.plot(history.history['loss'], label='Training Loss', color='pink')
+plt.plot(history.history['val_loss'], label='Validation Loss', color='red')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+# Predicting an Image
+image_path = "/kaggle/input/new-plant-diseases-dataset/test/test/CornCommonRust3.JPG"
+new_img = image.load_img(image_path, target_size=(224, 224))
+img = image.img_to_array(new_img)
+img = np.expand_dims(img, axis=0) / 255
+
+# Prediction
+prediction = classifier.predict(img)
+class_dict = training_set.class_indices
+li = list(class_dict.keys())
+predicted_class = li[np.argmax(prediction)]
+
+# Plot Image with Predicted Class
+plt.figure(figsize=(4, 4))
+plt.imshow(new_img)
+plt.axis('off')
+plt.title(predicted_class)
+plt.show()
